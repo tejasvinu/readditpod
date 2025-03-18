@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Readdit Pod Settings</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <h1>Readdit Pod</h1>
+    
+    <div class="tabs">
+        <div id="settingsTab" class="tab active">Settings</div>
+        <div id="historyTab" class="tab">History</div>
+    </div>
+    
+    <div id="settingsContent" class="content">
+        <div class="setting">
+            <label for="geminiApiKey">Gemini API Key:</label>
+            <div class="api-key-container">
+                <input type="password" id="geminiApiKey" placeholder="Enter your API key">
+                <button id="toggleApiKey" title="Show/Hide API Key">👁️</button>
+            </div>
+            <p class="description">Required for generating podcast scripts</p>
+        </div>
+        
+        <div class="setting">
+            <label for="voiceType">Voice:</label>
+            <select id="voiceType"></select>
+        </div>
+        
+        <div class="setting">
+            <label for="speakingRate">Speaking Rate: <span id="rateValue">1.0</span></label>
+            <input type="range" id="speakingRate" min="0.5" max="2" step="0.1" value="1">
+        </div>
+        
+        <div class="setting">
+            <label for="commentCount">Number of Comments:</label>
+            <input type="number" id="commentCount" min="1" max="50" value="10">
+        </div>
+        
+        <div class="setting checkbox">
+            <label>
+                <input type="checkbox" id="skipUsernames" checked>
+                Skip Usernames in Comments
+            </label>
+        </div>
+        
+        <button id="saveSettings">Save Settings</button>
+    </div>
+    
+    <div id="historyContent" class="content" style="display: none;">
+        <h2>Saved Podcasts</h2>
+        <div id="podcastHistory"></div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>
