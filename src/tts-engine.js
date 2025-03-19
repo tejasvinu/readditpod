@@ -45,6 +45,9 @@ const ttsEngine = {
             try {
                 const utterance = new SpeechSynthesisUtterance(text);
                 
+                // Set volume explicitly
+                utterance.volume = (options.volume !== undefined) ? options.volume : 1.0;
+                
                 // Apply settings
                 if (options.voiceType === 'male') {
                     // Find male voice

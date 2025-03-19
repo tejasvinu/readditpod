@@ -7,6 +7,7 @@ let audioContext;
 let audioDestination;
 let audioRecorder;
 let audioChunks = [];
+let isExtensionValid = true; // Flag to track extension validity
 
 // Ensure storage is available
 const storage = chrome.storage || browser.storage;
@@ -14,47 +15,90 @@ if (!storage) {
     console.error('Storage API not available. The extension may not work properly.');
 }
 
-// Error handling for extension context invalidation
+// Enhanced error handling for extension context invalidation
 function handleExtensionErrors(callback) {
     return async (...args) => {
+        if (!isExtensionValid) {
+            showExtensionUpdatedNotification();
+            return;
+        }
+        
         try {
             return await callback(...args);
         } catch (error) {
             if (error.message && error.message.includes('Extension context invalidated')) {
                 console.log('Extension was reloaded. Please refresh the page to use the extension.');
-                
-                // Show a notification to the user
-                const notification = document.createElement('div');
-                notification.style.position = 'fixed';
-                notification.style.top = '10px';
-                notification.style.left = '50%';
-                notification.style.transform = 'translateX(-50%)';
-                notification.style.backgroundColor = '#FF4500';
-                notification.style.color = 'white';
-                notification.style.padding = '10px 20px';
-                notification.style.borderRadius = '5px';
-                notification.style.zIndex = '10000';
-                notification.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
-                notification.textContent = 'Readdit Pod was updated. Please refresh the page to use it.';
-                
-                // Add close button
-                const closeBtn = document.createElement('span');
-                closeBtn.textContent = '✕';
-                closeBtn.style.marginLeft = '10px';
-                closeBtn.style.cursor = 'pointer';
-                closeBtn.onclick = () => notification.remove();
-                notification.appendChild(closeBtn);
-                
-                document.body.appendChild(notification);
-                
-                // Auto-remove after 10 seconds
-                setTimeout(() => notification.remove(), 10000);
+                isExtensionValid = false;
+                showExtensionUpdatedNotification();
             } else {
                 console.error('Error in extension:', error);
                 throw error;
             }
         }
     };
+}
+
+// Show notification when extension is updated
+function showExtensionUpdatedNotification() {
+    // Check if notification already exists
+    if (document.querySelector('#readdit-updated-notification')) return;
+    
+    const notification = document.createElement('div');
+    notification.id = 'readdit-updated-notification';
+    notification.style.position = 'fixed';
+    notification.style.top = '10px';
+    notification.style.left = '50%';
+    notification.style.transform = 'translateX(-50%)';
+    notification.style.backgroundColor = '#FF4500';
+    notification.style.color = 'white';
+    notification.style.padding = '10px 20px';
+    notification.style.borderRadius = '5px';
+    notification.style.zIndex = '10000';
+    notification.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
+    notification.style.display = 'flex';
+    notification.style.alignItems = 'center';
+    notification.style.gap = '10px';
+    notification.innerHTML = 'Readdit Pod was updated. <button id="refresh-page-btn" style="background: white; color: #FF4500; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer;">Refresh Page</button>';
+    
+    // Add close button
+    const closeBtn = document.createElement('span');
+    closeBtn.textContent = '✕';
+    closeBtn.style.marginLeft = '10px';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.onclick = () => notification.remove();
+    notification.appendChild(closeBtn);
+    
+    document.body.appendChild(notification);
+    
+    // Add refresh button functionality
+    document.getElementById('refresh-page-btn').addEventListener('click', () => {
+        window.location.reload();
+    });
+    
+    // Auto-remove after 30 seconds
+    setTimeout(() => {
+        if (notification.parentNode) {
+            notification.remove();
+        }
+    }, 30000);
+}
+
+// Safely access Chrome API
+async function safelyAccessStorage(action) {
+    if (!isExtensionValid) {
+        throw new Error('Extension context invalidated');
+    }
+    
+    try {
+        return await action();
+    } catch (error) {
+        if (error.message && error.message.includes('Extension context invalidated')) {
+            isExtensionValid = false;
+            showExtensionUpdatedNotification();
+            throw error;
+        }
+        throw error;
+    }
 }
 
 // Audio recording functions
@@ -166,23 +210,205 @@ function downloadAudio(audioBlob, filename) {
 }
 
 async function getRedditContent(settings) {
-    const title = document.querySelector('h1')?.textContent || '';
-    const selfText = document.querySelector('[data-test-id="post-content"]')?.textContent || '';
-    const comments = Array.from(document.querySelectorAll('.Comment'))
-        .slice(0, settings.commentCount)
-        .map(comment => {
-            const text = comment.querySelector('[data-testid="comment"]')?.textContent || '';
-            const username = settings.skipUsernames ? '' : 
-                (comment.querySelector('.author')?.textContent + ' writes: ');
-            return username + text.trim();
-        })
-        .filter(text => text.length > 0);
-
-    return {
-        title,
-        selfText,
-        comments
-    };
+    console.log("Fetching Reddit content...");
+    
+    // Show a temporary notification that content is being scraped
+    const scrapingNotification = document.createElement('div');
+    scrapingNotification.textContent = '🔍 Analyzing Reddit content...';
+    scrapingNotification.style.position = 'fixed';
+    scrapingNotification.style.bottom = '60px';
+    scrapingNotification.style.left = '20px';
+    scrapingNotification.style.backgroundColor = '#0079D3'; // Reddit blue
+    scrapingNotification.style.color = 'white';
+    scrapingNotification.style.padding = '10px 20px';
+    scrapingNotification.style.borderRadius = '5px';
+    scrapingNotification.style.zIndex = '10000';
+    document.body.appendChild(scrapingNotification);
+    
+    // Wait a moment for Reddit's dynamic content to load
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    try {
+        // Get the post title - try multiple methods
+        let title = '';
+        const titleSelectors = [
+            'h1', 
+            '[data-testid="post-title"]',
+            '.Post__title',
+            '.title'
+        ];
+        
+        for (const selector of titleSelectors) {
+            const titleElement = document.querySelector(selector);
+            if (titleElement && titleElement.textContent.trim()) {
+                title = titleElement.textContent.trim();
+                console.log(`Found post title with selector "${selector}":`, title);
+                break;
+            }
+        }
+        
+        // Try different selectors for post content to handle different Reddit layouts
+        let selfText = '';
+        const postContentSelectors = [
+            '[data-test-id="post-content"]',
+            '.Post__content',
+            '.RichTextJSON-root',
+            '.post-content',
+            '[data-click-id="text"]',
+            '.expando',
+            '.usertext-body',
+            '.PostContent',
+            '.entry .md',
+            '.ThreadPostContentContainer',
+            'div[id^="post-rtjson"]',
+            '.PostContent__contentContainer'
+        ];
+        
+        // Try each selector
+        for (const selector of postContentSelectors) {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                // Skip any that might be in comments
+                for (const element of elements) {
+                    // Check if this element is inside a comment
+                    if (!element.closest('.Comment') && !element.closest('.comment')) {
+                        selfText = element.textContent.trim();
+                        console.log(`Found post content with selector "${selector}":`, selfText);
+                        
+                        if (selfText) break;
+                    }
+                }
+                if (selfText) break;
+            }
+        }
+        
+        // If still no content, try to find by proximity to the title
+        if (!selfText && title) {
+            const titleElement = document.querySelector('h1');
+            if (titleElement) {
+                // Check siblings and nearby elements
+                let currentElement = titleElement.nextElementSibling;
+                let checkCount = 0;
+                while (currentElement && checkCount < 5) {
+                    if (currentElement.textContent.trim() && 
+                        !currentElement.querySelector('input') && // Skip form elements
+                        currentElement.textContent.length > 20) { // Skip short text
+                        selfText = currentElement.textContent.trim();
+                        console.log("Found post content by proximity to title:", selfText);
+                        break;
+                    }
+                    currentElement = currentElement.nextElementSibling;
+                    checkCount++;
+                }
+            }
+        }
+        
+        // Get comments - try multiple selectors and methods
+        const commentSelectors = [
+            '.Comment',
+            '.comment',
+            '[data-testid="comment"]',
+            '.CommentListItem',
+            '.usertext', 
+            '.commentEntry'
+        ];
+        
+        let commentElements = [];
+        for (const selector of commentSelectors) {
+            const elements = document.querySelectorAll(selector);
+            if (elements.length > 0) {
+                console.log(`Found ${elements.length} comments with selector "${selector}"`);
+                commentElements = Array.from(elements);
+                break;
+            }
+        }
+        
+        // Extract comment text
+        const comments = commentElements
+            .slice(0, settings.commentCount)
+            .map(comment => {
+                // Try different selectors to get comment text
+                const commentTextSelectors = [
+                    '.md',
+                    '[data-testid="comment"]',
+                    '.Comment__body',
+                    '.RichTextJSON-root',
+                    '.comment-content',
+                    '.usertext-body',
+                    '.CommentContent'
+                ];
+                
+                let commentText = '';
+                for (const selector of commentTextSelectors) {
+                    const element = comment.querySelector(selector);
+                    if (element && element.textContent.trim()) {
+                        commentText = element.textContent.trim();
+                        break;
+                    }
+                }
+                
+                // If no selector worked, just use the comment's own text content
+                if (!commentText) {
+                    commentText = comment.textContent.trim();
+                }
+                
+                // Get username if needed
+                let username = '';
+                if (!settings.skipUsernames) {
+                    const usernameSelectors = [
+                        '.author', 
+                        '[data-testid="username"]',
+                        '.CommentAuthor',
+                        '.head .tagline a',
+                        '.CommentHeader__username'
+                    ];
+                    
+                    for (const selector of usernameSelectors) {
+                        const element = comment.querySelector(selector);
+                        if (element && element.textContent.trim()) {
+                            username = element.textContent.trim() + ' writes: ';
+                            break;
+                        }
+                    }
+                }
+                
+                return username + commentText;
+            })
+            .filter(text => text.trim().length > 0);
+        
+        // Clean up scraped text
+        const cleanText = (text) => {
+            if (!text) return '';
+            // Remove excessive whitespace, common Reddit UI text
+            return text
+                .replace(/\s+/g, ' ')
+                .replace(/share save (hide )?report/gi, '')
+                .replace(/level \d+/gi, '')
+                .replace(/reply give award/gi, '')
+                .trim();
+        };
+        
+        // Build final content object
+        const result = {
+            title: cleanText(title),
+            selfText: cleanText(selfText),
+            comments: comments.map(cleanText)
+        };
+        
+        console.log("Final scraped content:", result);
+        scrapingNotification.remove();
+        return result;
+    } catch (error) {
+        console.error("Error scraping Reddit content:", error);
+        scrapingNotification.textContent = '❌ Error analyzing Reddit content';
+        setTimeout(() => scrapingNotification.remove(), 3000);
+        
+        return {
+            title: document.title || '',
+            selfText: '',
+            comments: []
+        };
+    }
 }
 
 function createTTSButton() {
@@ -304,8 +530,18 @@ async function initializeApp() {
         console.log("Initializing Readdit Pod on Reddit page");
         
         // Import TTS engine
-        const module = await import(ttsEnginePath);
-        ttsEngine = module.default;
+        try {
+            const module = await import(ttsEnginePath);
+            ttsEngine = module.default;
+        } catch (error) {
+            if (error.message && error.message.includes('Extension context invalidated')) {
+                isExtensionValid = false;
+                showExtensionUpdatedNotification();
+                return;
+            }
+            console.error('Failed to import TTS engine:', error);
+            return;
+        }
         
         // Create and add the podcast button
         const button = createTTSButton();
@@ -318,6 +554,11 @@ async function initializeApp() {
         
         // Wrap the click handler with our error handler
         button.addEventListener('click', handleExtensionErrors(async function() {
+            if (!isExtensionValid) {
+                showExtensionUpdatedNotification();
+                return;
+            }
+            
             button.disabled = true;
             button.textContent = '⏳ Creating Podcast...';
             
@@ -326,18 +567,23 @@ async function initializeApp() {
                 let apiKey = '';
                 try {
                     if (storage && storage.local) {
-                        const apiKeyResult = await new Promise((resolve) => {
-                            storage.local.get('geminiApiKey', (result) => {
-                                resolve(result);
+                        const result = await safelyAccessStorage(() => new Promise((resolve) => {
+                            storage.local.get('geminiApiKey', (data) => {
+                                resolve(data);
                             });
-                        });
-                        apiKey = apiKeyResult.geminiApiKey;
+                        }));
+                        apiKey = result.geminiApiKey || '';
                     }
                 } catch (error) {
                     console.warn('Error accessing storage:', error);
+                    if (error.message && error.message.includes('Extension context invalidated')) {
+                        button.disabled = false;
+                        button.textContent = '🎙️ Create Podcast';
+                        return;
+                    }
                 }
                 
-                if (!apiKey) {
+                if (!apiKey || apiKey.trim() === '') {
                     apiKey = prompt('Please enter your Gemini API key:');
                     if (!apiKey) {
                         throw new Error('Gemini API key is required');
@@ -356,7 +602,8 @@ async function initializeApp() {
                 let settings;
                 try {
                     if (storage && storage.local) {
-                        settings = await new Promise(resolve => {
+                        // Use safelyAccessStorage to avoid context invalidation errors
+                        settings = await safelyAccessStorage(() => new Promise(resolve => {
                             storage.local.get({
                                 voiceType: '',  // Will be filled with first available voice
                                 speakingRate: 1.0,
@@ -364,7 +611,7 @@ async function initializeApp() {
                                 skipUsernames: true,
                                 geminiApiKey: apiKey
                             }, resolve);
-                        });
+                        }));
                     } else {
                         settings = {
                             voiceType: '',
@@ -422,28 +669,32 @@ async function initializeApp() {
                 
             } catch (error) {
                 console.error('Error:', error);
-                alert('Error creating podcast: ' + error.message);
+                if (!error.message.includes('Extension context invalidated')) {
+                    alert('Error creating podcast: ' + error.message);
+                }
                 button.disabled = false;
                 button.textContent = '🎙️ Create Podcast';
             }
         }));
         
-        // Helper function to process script and create player
+        // New helper function to remove markdown formatting from the Gemini response
+        function stripMarkdown(text) {
+            return text.replace(/\*\*(.*?)\*\*/g, '$1');
+        }
+
+        // Helper function to process the script and create the audio player
         async function processScriptAndCreatePlayer(scriptText, settings) {
             try {
-                // Print the script to console
-                console.log('==== Generated Podcast Script ====');
-                console.log(scriptText);
-                console.log('=================================');
+                // Clean markdown formatting
+                const cleanedScript = stripMarkdown(scriptText);
+                console.log("Cleaned Script for Audio Generation:", cleanedScript);
                 
-                // Split script into parts by speaker
-                const alexParts = [];
-                const jamieParts = [];
-                
-                // Process the script to separate speakers
-                const lines = scriptText.split('\n');
+                // Split cleaned script into lines
+                const lines = cleanedScript.split('\n');
                 let currentSpeaker = null;
                 let currentText = '';
+                const alexParts = [];
+                const jamieParts = [];
                 
                 lines.forEach(line => {
                     if (line.startsWith('Alex:')) {
@@ -463,14 +714,14 @@ async function initializeApp() {
                     }
                 });
                 
-                // Add the last part
+                // Add the last part if any
                 if (currentSpeaker === 'Alex') {
                     alexParts.push(currentText.trim());
                 } else if (currentSpeaker === 'Jamie') {
                     jamieParts.push(currentText.trim());
                 }
                 
-                // Interleave the parts
+                // Interleave parts from both speakers
                 currentParts = [];
                 for (let i = 0; i < Math.max(alexParts.length, jamieParts.length); i++) {
                     if (i < alexParts.length) {
@@ -490,7 +741,6 @@ async function initializeApp() {
                 }
                 
                 currentPartIndex = 0;
-                
                 // Remove any existing player
                 const existingPlayer = document.querySelector('#reddit-tts-player');
                 if (existingPlayer) {
@@ -501,13 +751,16 @@ async function initializeApp() {
                 player.container.id = 'reddit-tts-player';
                 document.body.appendChild(player.container);
                 
-                // Initialize TTS engine
-                await ttsEngine.initialize();
+                // Log before starting audio generation
+                console.log("Starting audio generation for", currentParts.length, "parts.");
                 
-                // Initialize audio recording
+                // Initialize TTS engine and audio recording
+                await ttsEngine.initialize();
                 await initAudioRecording();
                 
-                const playPart = async () => {
+                // Changed declaration of playPart from const to let
+                let playPart = async () => {
+                    console.log("Starting playPart, currentPartIndex =", currentPartIndex);
                     if (currentPartIndex >= currentParts.length) {
                         currentPartIndex = 0;
                         isPlaying = false;
@@ -518,9 +771,10 @@ async function initializeApp() {
                     
                     isPlaying = true;
                     player.playButton.innerHTML = '&#10074;&#10074;'; // Pause symbol
-                    
                     const part = currentParts[currentPartIndex];
                     const voiceType = part.speaker === 'Alex' ? 'male' : 'female';
+                    
+                    console.log(`Speaking part ${currentPartIndex + 1} of ${currentParts.length} (${part.speaker}):`, part.text);
                     
                     // Show current transcript
                     player.transcript.style.display = 'block';
@@ -537,7 +791,6 @@ async function initializeApp() {
                         
                         // Move to next part
                         currentPartIndex++;
-                        
                         if (isPlaying) {
                             playPart();
                         }
@@ -548,7 +801,9 @@ async function initializeApp() {
                     }
                 };
                 
+                // Add logging to the play button click handler
                 player.playButton.addEventListener('click', () => {
+                    console.log("Play button clicked");
                     if (isPlaying) {
                         isPlaying = false;
                         ttsEngine.cancel();
@@ -558,37 +813,8 @@ async function initializeApp() {
                     }
                 });
                 
-                player.stopButton.addEventListener('click', () => {
-                    isPlaying = false;
-                    ttsEngine.cancel();
-                    currentPartIndex = 0;
-                    player.playButton.innerHTML = '&#9658;';
-                    player.progress.style.width = '0%';
-                    player.transcript.style.display = 'none';
-                });
-                
-                // Add download button to player
-                const downloadButton = document.createElement('button');
-                downloadButton.innerHTML = '⬇️';
-                downloadButton.title = 'Download Podcast';
-                downloadButton.style.fontSize = '20px';
-                downloadButton.style.cursor = 'pointer';
-                downloadButton.style.border = 'none';
-                downloadButton.style.background = 'none';
-                downloadButton.style.width = '40px';
-                downloadButton.style.height = '40px';
-                downloadButton.style.borderRadius = '50%';
-                downloadButton.style.backgroundColor = '#eee';
-                downloadButton.style.marginLeft = '10px';
-                
-                // Find the correct container for the download button
-                const controlsContainer = player.stopButton.parentNode; // Get the parent of stop button
-                controlsContainer.appendChild(downloadButton);
-                
-                // Start recording when playing
                 let isRecording = false;
                 const originalPlayPart = playPart;
-                
                 playPart = async function() {
                     if (currentPartIndex === 0 && !isRecording) {
                         startRecording();
@@ -615,7 +841,6 @@ async function initializeApp() {
                 };
                 
                 player.loadingText.remove();
-                
                 button.disabled = false;
                 button.textContent = '🎙️ Create Podcast';
             } catch (error) {
@@ -627,7 +852,8 @@ async function initializeApp() {
         }
     } catch (error) {
         if (error.message && error.message.includes('Extension context invalidated')) {
-            console.log('Extension was reloaded. Please refresh the page to use the extension.');
+            isExtensionValid = false;
+            showExtensionUpdatedNotification();
         } else {
             console.error('Failed to initialize app:', error);
         }
@@ -645,6 +871,8 @@ window.addEventListener('pushstate', safeInitialize);
 // For Reddit's SPA, monitor for URL changes with error handling
 let lastUrl = location.href; 
 new MutationObserver(() => {
+    if (!isExtensionValid) return;
+    
     try {
         const url = location.href;
         if (url !== lastUrl) {
@@ -654,7 +882,8 @@ new MutationObserver(() => {
         }
     } catch (error) {
         if (error.message && error.message.includes('Extension context invalidated')) {
-            console.log('Extension was reloaded. Cannot reinitialize. Please refresh the page.');
+            isExtensionValid = false;
+            showExtensionUpdatedNotification();
         } else {
             console.error('Error in URL change observer:', error);
         }

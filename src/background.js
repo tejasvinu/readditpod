@@ -11,6 +11,12 @@ chrome.runtime.onStartup.addListener(() => {
 // Function to directly call Gemini API without curl
 async function generateContentWithGemini(content, apiKey) {
     try {
+        // Log what content we received from Reddit
+        console.log("Content received from Reddit page:");
+        console.log("- Title:", content.title);
+        console.log("- Main content:", content.selfText || "(No main content)");
+        console.log("- Comments:", content.comments.length ? `${content.comments.length} comments` : "No comments");
+        
         // Create payload for Gemini API
         const payload = {
             contents: [
@@ -21,8 +27,8 @@ async function generateContentWithGemini(content, apiKey) {
                             text: `Create an engaging podcast script from this Reddit content. Format it as a conversation between two hosts named Alex and Jamie. Make it sound natural and entertaining while covering these key points:
 
 Title: ${content.title}
-Main Content: ${content.selfText}
-Comments: ${content.comments.join('\n')}
+Main Content: ${content.selfText || "(No post content available)"}
+Comments: ${content.comments.length > 0 ? content.comments.join('\n\n') : "(No comments available)"}
 
 Keep the tone conversational and include some light banter between hosts.`
                         }
@@ -46,9 +52,14 @@ Keep the tone conversational and include some light banter between hosts.`
             }
         };
 
+        // Log the Gemini request
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-thinking-exp-01-21:generateContent?key=${apiKey}`;
+        console.log("Gemini Request URL:", apiUrl);
+        console.log("Gemini Request Payload:", payload);
+
         // Make the API call directly
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+            apiUrl,
             {
                 method: 'POST',
                 headers: {
@@ -58,12 +69,17 @@ Keep the tone conversational and include some light banter between hosts.`
             }
         );
 
+        // Log raw response data before error check
+        const rawResponse = await response.clone().json();
+        console.log("Gemini Raw Response:", rawResponse);
+
         if (!response.ok) {
             const errorData = await response.json();
             throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
         }
 
         const data = await response.json();
+        console.log("Gemini Parsed Response:", data);
         
         // Extract the script text from the response
         const scriptText = data.candidates?.[0]?.content?.parts?.[0]?.text;
