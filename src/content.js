@@ -225,8 +225,75 @@ async function getRedditContent(settings) {
     scrapingNotification.style.zIndex = '10000';
     document.body.appendChild(scrapingNotification);
     
-    // Wait a moment for Reddit's dynamic content to load
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // NEW: Check if this is a Shreddit post and use custom selectors
+    const shredditTitleEl = document.querySelector('shreddit-title');
+    if (shredditTitleEl) {
+        // Custom scraping for Shreddit posts
+        const title = shredditTitleEl.getAttribute('title') || '';
+        const postEl = document.querySelector('shreddit-post');
+        const selfText = postEl ? postEl.innerText.trim() : '';
+        
+        // Improved comment extraction for Shreddit
+        let comments = [];
+        
+        // Try multiple selectors to find all comments
+        const commentContainers = [
+            ...document.querySelectorAll('#comment-tree, [id^="comment-tree-content-anchor"]')
+        ];
+        
+        if (commentContainers.length > 0) {
+            console.log(`Found ${commentContainers.length} comment containers`);
+            
+            // Process each container
+            commentContainers.forEach(container => {
+                // Use all comment elements, including shreddit-comment elements
+                const allComments = container.querySelectorAll('shreddit-comment, .Comment');
+                console.log(`Found ${allComments.length} comments in container`);
+                
+                allComments.forEach(comment => {
+                    // Extract comment body text while avoiding UI elements
+                    const commentBody = comment.querySelector('.comment-body, .RichTextJSON-root, .md-container');
+                    if (commentBody) {
+                        // Skip "more replies" buttons and other UI elements
+                        const commentText = commentBody.innerText.trim()
+                            .replace(/(\d+ more replies?|Show parent comments|Continue this thread)/g, '')
+                            .trim();
+                        
+                        if (commentText && commentText.length > 5) {
+                            comments.push(commentText);
+                        }
+                    } else {
+                        // Fallback to taking all text content
+                        const fullText = comment.innerText.trim();
+                        if (fullText && fullText.length > 15 && !fullText.includes('level 1') && !fullText.includes('load more comments')) {
+                            comments.push(fullText);
+                        }
+                    }
+                });
+            });
+        } 
+        
+        // Fallback to XPath approach if no comments found
+        if (comments.length === 0) {
+            const xpathResult = document.evaluate(
+                '/html/body/shreddit-app/div[2]/div/div/main/div',
+                document,
+                null,
+                XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+                null
+            );
+            for (let i = 0; i < xpathResult.snapshotLength; i++) {
+                const node = xpathResult.snapshotItem(i);
+                if (node && node.innerText.trim()) {
+                    comments.push(node.innerText.trim());
+                }
+            }
+        }
+        
+        console.log("Custom scraped content for Shreddit:", { title, selfText, comments: comments.length });
+        scrapingNotification.remove();
+        return { title, selfText, comments: comments.slice(0, settings.commentCount) };
+    }
     
     try {
         // Get the post title - try multiple methods
@@ -303,78 +370,128 @@ async function getRedditContent(settings) {
             }
         }
         
-        // Get comments - try multiple selectors and methods
-        const commentSelectors = [
-            '.Comment',
-            '.comment',
-            '[data-testid="comment"]',
-            '.CommentListItem',
-            '.usertext', 
-            '.commentEntry'
-        ];
-        
-        let commentElements = [];
-        for (const selector of commentSelectors) {
-            const elements = document.querySelectorAll(selector);
-            if (elements.length > 0) {
-                console.log(`Found ${elements.length} comments with selector "${selector}"`);
-                commentElements = Array.from(elements);
-                break;
-            }
-        }
-        
-        // Extract comment text
-        const comments = commentElements
-            .slice(0, settings.commentCount)
-            .map(comment => {
-                // Try different selectors to get comment text
-                const commentTextSelectors = [
-                    '.md',
-                    '[data-testid="comment"]',
-                    '.Comment__body',
-                    '.RichTextJSON-root',
-                    '.comment-content',
-                    '.usertext-body',
-                    '.CommentContent'
-                ];
+        // Extract comments from the specific div - this is the part we're updating
+        let comments = [];
+        const commentContainer = document.querySelector('#comment-tree');
+        if (commentContainer) {
+            // Recursive function to extract all comments including nested replies
+            function extractCommentsRecursively(element, depth = 0) {
+                if (!element) return;
                 
-                let commentText = '';
-                for (const selector of commentTextSelectors) {
-                    const element = comment.querySelector(selector);
-                    if (element && element.textContent.trim()) {
-                        commentText = element.textContent.trim();
-                        break;
+                // Find all comments at this level - both direct comments and replies
+                const commentElements = element.querySelectorAll(':scope > div, :scope > shreddit-comment, :scope > .Comment');
+                
+                // Process each comment element
+                commentElements.forEach(commentEl => {
+                    // Extract the text from this comment (avoiding buttons, metadata, etc.)
+                    const commentTextEls = commentEl.querySelectorAll('.comment-body, .RichTextJSON-root, .commentContent');
+                    let commentText = '';
+                    
+                    if (commentTextEls.length > 0) {
+                        // Use the first matching text element
+                        commentText = commentTextEls[0].innerText.trim();
+                    } else {
+                        // Fallback to the comment's own text, excluding child comments
+                        const clone = commentEl.cloneNode(true);
+                        // Remove reply containers and buttons to avoid including nested content
+                        clone.querySelectorAll('.replies, .reply-button, .comment-footer, .action-buttons').forEach(el => el.remove());
+                        commentText = clone.innerText.trim();
                     }
+                    
+                    if (commentText) {
+                        comments.push(commentText);
+                    }
+                    
+                    // Find reply containers within this comment
+                    const replyContainers = commentEl.querySelectorAll('.replies, .comment-replies, [id^="comment-tree-content-anchor"]');
+                    
+                    // Recursively process replies
+                    replyContainers.forEach(replyContainer => {
+                        extractCommentsRecursively(replyContainer, depth + 1);
+                    });
+                });
+            }
+            
+            // Start the recursive extraction from the main comment tree
+            extractCommentsRecursively(commentContainer);
+            console.log(`Extracted ${comments.length} total comments including nested replies`);
+            
+            // Limit to requested number
+            comments = comments.slice(0, settings.commentCount);
+        } else {
+            // Get comments - try multiple selectors and methods
+            const commentSelectors = [
+                '.Comment',
+                '.comment',
+                '[data-testid="comment"]',
+                '.CommentListItem',
+                '.usertext', 
+                '.commentEntry'
+            ];
+            
+            let commentElements = [];
+            for (const selector of commentSelectors) {
+                const elements = document.querySelectorAll(selector);
+                if (elements.length > 0) {
+                    console.log(`Found ${elements.length} comments with selector "${selector}"`);
+                    commentElements = Array.from(elements);
+                    break;
                 }
-                
-                // If no selector worked, just use the comment's own text content
-                if (!commentText) {
-                    commentText = comment.textContent.trim();
-                }
-                
-                // Get username if needed
-                let username = '';
-                if (!settings.skipUsernames) {
-                    const usernameSelectors = [
-                        '.author', 
-                        '[data-testid="username"]',
-                        '.CommentAuthor',
-                        '.head .tagline a',
-                        '.CommentHeader__username'
+            }
+            
+            // Extract comment text
+            comments = commentElements
+                .slice(0, settings.commentCount)
+                .map(comment => {
+                    // Try different selectors to get comment text
+                    const commentTextSelectors = [
+                        '.md',
+                        '[data-testid="comment"]',
+                        '.Comment__body',
+                        '.RichTextJSON-root',
+                        '.comment-content',
+                        '.usertext-body',
+                        '.CommentContent'
                     ];
                     
-                    for (const selector of usernameSelectors) {
+                    let commentText = '';
+                    for (const selector of commentTextSelectors) {
                         const element = comment.querySelector(selector);
                         if (element && element.textContent.trim()) {
-                            username = element.textContent.trim() + ' writes: ';
+                            commentText = element.textContent.trim();
                             break;
                         }
                     }
-                }
-                
-                return username + commentText;
-            })
-            .filter(text => text.trim().length > 0);
+                    
+                    // If no selector worked, just use the comment's own text content
+                    if (!commentText) {
+                        commentText = comment.textContent.trim();
+                    }
+                    
+                    // Get username if needed
+                    let username = '';
+                    if (!settings.skipUsernames) {
+                        const usernameSelectors = [
+                            '.author', 
+                            '[data-testid="username"]',
+                            '.CommentAuthor',
+                            '.head .tagline a',
+                            '.CommentHeader__username'
+                        ];
+                        
+                        for (const selector of usernameSelectors) {
+                            const element = comment.querySelector(selector);
+                            if (element && element.textContent.trim()) {
+                                username = element.textContent.trim() + ' writes: ';
+                                break;
+                            }
+                        }
+                    }
+                    
+                    return username + commentText;
+                })
+                .filter(text => text.trim().length > 0);
+        }
         
         // Clean up scraped text
         const cleanText = (text) => {
@@ -754,8 +871,34 @@ async function initializeApp() {
                 // Log before starting audio generation
                 console.log("Starting audio generation for", currentParts.length, "parts.");
                 
-                // Initialize TTS engine and audio recording
-                await ttsEngine.initialize();
+                // Initialize TTS engine with improved error handling
+                try {
+                    console.log("Initializing TTS engine...");
+                    await ttsEngine.initialize();
+                    console.log("TTS engine initialized successfully");
+                } catch (ttsError) {
+                    console.error("Error initializing TTS engine:", ttsError);
+                    // Show error notification
+                    const errorNotification = document.createElement('div');
+                    errorNotification.textContent = `🔊 TTS Error: ${ttsError.message}`;
+                    errorNotification.style.position = 'fixed';
+                    errorNotification.style.bottom = '60px';
+                    errorNotification.style.left = '20px';
+                    errorNotification.style.backgroundColor = '#FF4500';
+                    errorNotification.style.color = 'white';
+                    errorNotification.style.padding = '10px 20px';
+                    errorNotification.style.borderRadius = '5px';
+                    errorNotification.style.zIndex = '10000';
+                    document.body.appendChild(errorNotification);
+                    
+                    // Auto-remove notification after 10 seconds
+                    setTimeout(() => {
+                        errorNotification.remove();
+                    }, 10000);
+                    
+                    throw ttsError;
+                }
+                
                 await initAudioRecording();
                 
                 // Changed declaration of playPart from const to let

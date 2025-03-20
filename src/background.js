@@ -17,6 +17,11 @@ async function generateContentWithGemini(content, apiKey) {
         console.log("- Main content:", content.selfText || "(No main content)");
         console.log("- Comments:", content.comments.length ? `${content.comments.length} comments` : "No comments");
         
+        // Create formatted content to improve Gemini's processing
+        const formattedComments = content.comments.map((comment, index) => 
+            `Comment ${index + 1}: ${comment.replace(/\n+/g, ' ').trim()}`
+        ).join('\n\n');
+        
         // Create payload for Gemini API
         const payload = {
             contents: [
@@ -28,9 +33,9 @@ async function generateContentWithGemini(content, apiKey) {
 
 Title: ${content.title}
 Main Content: ${content.selfText || "(No post content available)"}
-Comments: ${content.comments.length > 0 ? content.comments.join('\n\n') : "(No comments available)"}
+Comments: ${content.comments.length > 0 ? formattedComments : "(No comments available)"}
 
-Keep the tone conversational and include some light banter between hosts.`
+Keep the tone conversational and include some light banter between hosts. Create a complete podcast discussion that explores multiple viewpoints from the comments.`
                         }
                     ]
                 }
@@ -52,10 +57,10 @@ Keep the tone conversational and include some light banter between hosts.`
             }
         };
 
-        // Log the Gemini request
+        // Use the latest Gemini model (update as needed)
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-thinking-exp-01-21:generateContent?key=${apiKey}`;
-        console.log("Gemini Request URL:", apiUrl);
-        console.log("Gemini Request Payload:", payload);
+        console.log("Gemini Request URL:", apiUrl.replace(apiKey, "[API_KEY_REDACTED]"));
+        console.log("Gemini Request Payload:", {...payload, contents: [{...payload.contents[0], parts: [{text: "Content redacted for logging"}]}]});
 
         // Make the API call directly
         const response = await fetch(
@@ -69,17 +74,18 @@ Keep the tone conversational and include some light banter between hosts.`
             }
         );
 
-        // Log raw response data before error check
-        const rawResponse = await response.clone().json();
-        console.log("Gemini Raw Response:", rawResponse);
-
+        // Check for HTTP errors first
         if (!response.ok) {
+            // Get the error details
             const errorData = await response.json();
-            throw new Error(`Gemini API error: ${errorData.error?.message || response.statusText}`);
+            const errorMessage = errorData.error?.message || 
+                                errorData.error?.details?.[0]?.message || 
+                                `HTTP error ${response.status}`;
+            throw new Error(`Gemini API error: ${errorMessage}`);
         }
 
         const data = await response.json();
-        console.log("Gemini Parsed Response:", data);
+        console.log("Gemini Response Status:", data.promptFeedback?.blockReason || "Success");
         
         // Extract the script text from the response
         const scriptText = data.candidates?.[0]?.content?.parts?.[0]?.text;
